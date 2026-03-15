@@ -1,0 +1,13 @@
+[
+  {
+    "keyword": "特朗普,降息",
+    "webhook": "https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN",
+    "format": "discord"
+  },
+  {
+    "keyword": "黑天鹅,暴跌",
+    "webhook": "https://api.telegram.org/bot<BOT_TOKEN>/sendMessage",
+    "format": "telegram",
+    "chatId": "YOUR_CHAT_ID"
+  }
+]

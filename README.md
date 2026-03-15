@@ -86,7 +86,42 @@ node scripts/collector.js --health
 对 agent 说"帮我追踪一下原油的事件"，自动搜索相关关键词 + 生成专题时间线总结。
 
 ### 关键词告警
-设定关键词（如"降息""黑天鹅"），有新快讯命中就推送到手机或 Discord。
+
+快讯入库时实时检查关键词，命中就通过 Webhook 推送。支持 Telegram、Discord、飞书、自定义 Webhook。
+
+创建 `data/alerts.json`：
+
+```json
+[
+  {
+    "keyword": "特朗普,降息",
+    "webhook": "https://discord.com/api/webhooks/ID/TOKEN",
+    "format": "discord"
+  },
+  {
+    "keyword": "黑天鹅,暴跌",
+    "webhook": "https://api.telegram.org/bot<TOKEN>/sendMessage",
+    "format": "telegram",
+    "chatId": "123456"
+  },
+  {
+    "keyword": "央行",
+    "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
+    "format": "feishu"
+  },
+  {
+    "keyword": "紧急",
+    "webhook": "https://your-server.com/alert",
+    "format": "plain"
+  }
+]
+```
+
+**配置说明：**
+- `keyword`：逗号分隔，任一命中即触发（OR 匹配）
+- `format`：`telegram` / `discord` / `feishu`（飞书）/ `plain`（通用 JSON POST）
+- `importantOnly`：可选，设为 `true` 只推送重要快讯
+- 热加载：修改 alerts.json 后无需重启采集服务
 
 ### 定时推送
 配合 cron，每天早上自动生成昨晚简报发到指定频道。

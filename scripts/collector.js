@@ -17,6 +17,7 @@
  */
 
 const https = require('https');
+const http = require('http');
 const path = require('path');
 const fs = require('fs');
 
@@ -151,6 +152,99 @@ function save(item) {
   );
 }
 
+// === 告警配置 ===
+// 从 alerts.json 读取告警规则，格式：
+// [{ "keyword": "特朗普", "channel": "telegram", "target": "1367764826" }]
+const ALERTS_PATH = process.env.ALERTS_PATH || path.join(SKILL_DIR, 'data', 'alerts.json');
+
+function loadAlerts() {
+  try {
+    if (fs.existsSync(ALERTS_PATH)) return JSON.parse(fs.readFileSync(ALERTS_PATH, 'utf-8'));
+  } catch (e) { console.error('[Alert] Failed to load alerts.json:', e.message); }
+  return [];
+}
+
+function checkAlerts(content, time, important) {
+  const alerts = loadAlerts();
+  if (alerts.length === 0) return;
+  
+  for (const rule of alerts) {
+    const keywords = (rule.keyword || '').split(',').filter(Boolean);
+    const matched = keywords.some(kw => content.includes(kw));
+    if (!matched) continue;
+    if (rule.importantOnly && !important) continue;
+    
+    const matchedKw = keywords.find(kw => content.includes(kw));
+    const text = `🔔 快讯告警 [${matchedKw}]\n\n${time}\n${content.slice(0, 500)}`;
+    
+    sendAlert(text, rule).catch(e => {
+      console.error(`[Alert] Push failed: ${e.message}`);
+    });
+  }
+}
+
+// 通过 Webhook 推送告警（支持 Telegram / Discord / 飞书 / 自定义）
+// 
+// alerts.json 格式：
+// [
+//   { "keyword": "特朗普", "webhook": "https://api.telegram.org/bot<TOKEN>/sendMessage", "format": "telegram", "chatId": "123456" },
+//   { "keyword": "降息,加息", "webhook": "https://discord.com/api/webhooks/ID/TOKEN", "format": "discord" },
+//   { "keyword": "黑天鹅", "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx", "format": "feishu" },
+//   { "keyword": "暴跌", "webhook": "https://your-server.com/alert", "format": "plain" }
+// ]
+function buildPayload(text, rule) {
+  const fmt = (rule.format || 'plain').toLowerCase();
+  switch (fmt) {
+    case 'telegram':
+      return JSON.stringify({ chat_id: rule.chatId || rule.target, text, disable_web_page_preview: true });
+    case 'discord':
+      return JSON.stringify({ content: text.slice(0, 2000) });
+    case 'feishu':
+    case 'lark':
+      return JSON.stringify({ msg_type: 'text', content: { text } });
+    default: // plain JSON
+      return JSON.stringify({ text, timestamp: new Date().toISOString() });
+  }
+}
+
+function sendAlert(text, rule) {
+  const webhookUrl = rule.webhook;
+  if (!webhookUrl) return Promise.reject(new Error('No webhook URL'));
+  
+  const payload = buildPayload(text, rule);
+  const url = new URL(webhookUrl);
+  const transport = url.protocol === 'https:' ? https : http;
+  
+  return new Promise((resolve, reject) => {
+    const req = transport.request({
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname + url.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload)
+      },
+      timeout: 10000
+    }, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          console.log(`[Alert] Pushed to ${rule.format || 'webhook'}: ${url.hostname}`);
+          resolve(data);
+        } else {
+          reject(new Error(`Webhook ${res.statusCode}: ${data.slice(0, 200)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.write(payload);
+    req.end();
+  });
+}
+
 // === 轮询 ===
 let seenIds = new Set();
 let stats = { polls: 0, saved: 0, skipped: 0, errors: 0 };
@@ -172,7 +266,12 @@ async function poll() {
         continue;
       }
       
-      if (!process.env.DRY_RUN) save(item);
+      if (!process.env.DRY_RUN) {
+        save(item);
+        // 入库后检查告警
+        const content = cleanHTML(item.data?.content || '');
+        checkAlerts(content, item.time || '', item.important || 0);
+      }
       newSaved++;
       stats.saved++;
     }
