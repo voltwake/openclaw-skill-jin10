@@ -156,7 +156,50 @@ node skills/jin10/scripts/query.js --count --today
 
 ### 关键词告警
 **触发**："降息相关的快讯帮我推送""出现黑天鹅就通知我"
-**实现**：搜索（关键词匹配）→ 有新匹配时推送到指定频道
+**实现**：采集服务内置关键词匹配，每条快讯入库时自动检查，命中则通过 Webhook 推送。
+
+**配置文件**：`skills/jin10/data/alerts.json`
+
+```json
+[
+  {
+    "keyword": "特朗普,关税",
+    "webhook": "https://api.telegram.org/bot<TOKEN>/sendMessage",
+    "format": "telegram",
+    "chatId": "123456"
+  },
+  {
+    "keyword": "降息,加息,利率",
+    "webhook": "https://discord.com/api/webhooks/ID/TOKEN",
+    "format": "discord"
+  },
+  {
+    "keyword": "黑天鹅,暴跌",
+    "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
+    "format": "feishu"
+  },
+  {
+    "keyword": "原油",
+    "webhook": "https://your-server.com/alert",
+    "format": "plain"
+  }
+]
+```
+
+**字段说明**：
+| 字段 | 说明 |
+|------|------|
+| `keyword` | 关键词，逗号分隔，OR 匹配（任一命中即触发） |
+| `webhook` | 推送地址（Telegram Bot API / Discord Webhook / 飞书 / 自定义 URL） |
+| `format` | 推送格式：`telegram` / `discord` / `feishu` / `plain` |
+| `chatId` | Telegram 专用，目标 chat ID |
+
+**工作原理**：`collector.js` 每条快讯入库后调用 `checkAlerts()`，匹配关键词则通过对应 Webhook 推送。无需额外 cron，采集服务运行期间自动生效。修改 `alerts.json` 后无需重启，下次轮询自动加载新规则。
+
+也可用独立脚本手动检查：
+```bash
+node scripts/alert.js --keyword "降息" --seconds 120
+```
 
 ### 定时推送
 **触发**："每天早上8点给我发一份昨晚简报"
